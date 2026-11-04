@@ -30,7 +30,5 @@ int main() {
   // I = {}
   zbior_ary I = iloczyn(H, A);
   assert(moc(I) == 0);
-  zbior_ary A1 = ciag_arytmetyczny(-9, 2, 9);
-  assert(moc(A1) == 10);
   return 0;
 }

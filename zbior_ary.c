@@ -4,30 +4,35 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
+#include "zbior_ary.h"
 
 // komentarz dotyczacy danej linijki jest nad nia lub na prawo od niej
 
-int min(int a, int b) { return a < b ? a : b; }
-int max(int a, int b) { return a > b ? a : b; }
+static inline unsigned min(long long a, long long b) { return (unsigned)(a < b ? a : b); }
 // zeby wynik modulo trafial w {0,1,...,q-1}
-int mod(int a, int q) {
-  int x = a % q;
-  if (x < 0) x = (x + q) % q;
-  return x;
+static inline unsigned mod(int a, int b) {
+  assert(b > 0);
+  int x = a % b;
+  if (x < 0) x += b;
+  return (unsigned)x; //i tak jest dodatni
 }
-static int q_globalne;
+static int q = 0;
 
-// sprawdza czy dany wskaznik zostal po mallocu poprawnie zaalokowany, jesli nie
+// mallocuje podana wielkosc 
+// i sprawdza czy dany wskaznik zostal po mallocu poprawnie zaalokowany, jesli nie
 // to wywala program
-void check_alloc(void* ptr) {
-  if (ptr == NULL) {
+static int* alokowanie(size_t size) {
+  int *tmp = malloc(size);
+  if (tmp == NULL) {
     fprintf(stderr, "blad w alokacji pamieci\n");
     exit(1);
   }
+  return tmp;
 }
 
 // zwalnianie pamieci zaalokowanej przez wskazniki wewnatrz zbioru
-void free_ary(zbior_ary* Aptr) {
+static void free_ary(zbior_ary* Aptr) {
   if (Aptr == NULL) return;
   free(Aptr->poczatek);
   free(Aptr->koniec);
@@ -36,30 +41,19 @@ void free_ary(zbior_ary* Aptr) {
   Aptr->ary = 0;
 }
 
-// // printowanie dla latwiejszego debugowania, zostawiam bo zdarza sie byc przydatne
-// void print_ary(zbior_ary A) {
-//   printf("ary: %d\n", A.ary);
-//   for (unsigned i = 0; i < A.ary; i++) {
-//     printf("%d %d\n", A.poczatek[i], A.koniec[i]);
-//   }
-// }
-
-zbior_ary ciag_pusty(void) {
+// generuje nam ciag pusty z ary == 0
+static zbior_ary ciag_pusty(void) {
   zbior_ary z = {.ary = 0, .poczatek = NULL, .koniec = NULL};
   return z;
 }
 
 // kopiuje nam wejsciowy zbior alokujac nowa pamiec
-zbior_ary kopia_ary(zbior_ary A) {
+static zbior_ary kopia_ary(zbior_ary A) {
   if (A.ary == 0) return ciag_pusty();
-  int* poczatek = malloc((size_t)A.ary * sizeof(int));
-  int* koniec = malloc((size_t)A.ary * sizeof(int));
-  check_alloc(poczatek);
-  check_alloc(koniec);
-  for (unsigned i = 0; i < A.ary; i++) {
-    poczatek[i] = A.poczatek[i];
-    koniec[i] = A.koniec[i];
-  }
+  int *poczatek = alokowanie(A.ary * sizeof(int));
+  int *koniec = alokowanie(A.ary * sizeof(int)); 
+  memcpy(poczatek, A.poczatek, A.ary * sizeof(int));
+  memcpy(koniec, A.koniec, A.ary * sizeof(int));
   zbior_ary z = {.ary = A.ary, .poczatek = poczatek, .koniec = koniec};
   return z;
 }
@@ -68,16 +62,12 @@ zbior_ary kopia_ary(zbior_ary A) {
 // poczatkowym a, końcowym b i roznicy q>0, tj. {a,a+q,...,b}. Mozesz zalozyc,
 // ze we wszystkich zapytaniach w danym tescie wartosc q bedzie taka sama.
 // Mozesz zalozyc, ze ta funkcja zostanie wywolana jako pierwsza.
-zbior_ary ciag_arytmetyczny(int a, int q, int b) {
-  if (q <= 0) {
-    fprintf(stderr, "blad: roznica ciagu musi byc dodatnia");
-    exit(1);
-  }
-  q_globalne = q;
-  int* poczatek = malloc(sizeof (int));
-  int* koniec = malloc(sizeof (int));
-  check_alloc(poczatek);
-  check_alloc(koniec);
+zbior_ary ciag_arytmetyczny(int a, int q_, int b) {
+  assert(q_ > 0);
+  if (q == 0) q = q_;
+  assert(q_ == q);
+  int *poczatek = alokowanie(sizeof (int));
+  int *koniec = alokowanie(sizeof (int));
   poczatek[0] = a;
   koniec[0] = b;
   zbior_ary z = {.ary = 1, .poczatek = poczatek, .koniec = koniec};
@@ -85,195 +75,210 @@ zbior_ary ciag_arytmetyczny(int a, int q, int b) {
 }
 
 // Daje w wyniku zbior zlozony z samego elementu a, tj. {a}.
-zbior_ary singleton(int a) { return ciag_arytmetyczny(a, q_globalne, a); }
-
-// tworzy nam podzbior A gdzie elementy maja konkretna reszte modulo q_globalne
-// w zbiorze {0,1,...,q-1}
-zbior_ary separuj(int r, zbior_ary A) {
-  if (A.ary == 0) return ciag_pusty();
-  // szukanie start bisekcja: najmniejszego elementu z modulo >= r
-  unsigned lewy = 0, prawy = A.ary - 1;
-  while (lewy < prawy) {
-    unsigned srodek = (lewy + prawy) / 2;
-    if (mod(A.poczatek[srodek], q_globalne) >= r)
-      prawy = srodek;
-    else
-      lewy = srodek + 1;
-  }
-  unsigned start = lewy;
-  // sprawdzenie czy ten podzbior nie zawiera startu (jest pusty)
-  if (start == A.ary || mod(A.poczatek[start], q_globalne) != r)
-    return ciag_pusty();
-  // szukanie finish bisekcja: najmniejszego elementu z modulo > r 
-  lewy = 0, prawy = A.ary - 1;
-  unsigned finish = A.ary;
-  while (lewy <= prawy) {
-    unsigned srodek = (lewy + prawy) / 2;
-    if (mod(A.poczatek[srodek], q_globalne) <= r)
-      lewy = srodek + 1;
-    else {
-      finish = srodek;
-      prawy = srodek - 1;
-    }
-  }
-  assert(finish > start);
-  unsigned ary = finish - start;
-  assert(ary != 0);
-  // alokowanie nowej wyseparowanej tablicy
-  int* poczatek = malloc((size_t)ary * sizeof(int));
-  int* koniec = malloc((size_t)ary * sizeof(int));
-  check_alloc(poczatek);
-  check_alloc(koniec);
-  for (unsigned i = 0; i < ary; i++) {
-    poczatek[i] = A.poczatek[start + i];
-    koniec[i] = A.koniec[start + i];
-  }
-  zbior_ary z = {.ary = ary, .poczatek = poczatek, .koniec = koniec};
-  return z;
+zbior_ary singleton(int a) { 
+  assert(q != 0);
+  return ciag_arytmetyczny(a, q, a); 
 }
-// kopiuje zawartosc danego zbioru do wynik_rzeczy, przydaje sie w scal_suma i scal_roznica
-void scal_kopia(unsigned *wynik_ary, int *wynik_poczatek, int *wynik_koniec, zbior_ary A) {
-  for (unsigned ary = 0; ary < A.ary; ary++) {
-    wynik_poczatek[ary] = A.poczatek[ary];
-    wynik_koniec[ary] = A.koniec[ary];
-    (*wynik_ary)++;
-  }
+
+// kopiuje zawartosc danego zbioru do danych wskaznikow (modyfikuje), przydaje sie w scal_suma i scal_roznica
+static void scal_kopia(unsigned *ary_wynik, int *poczatek_tab, int *koniec_tab, zbior_ary A) {
+  memcpy(poczatek_tab, A.poczatek, A.ary * sizeof(int));
+  memcpy(koniec_tab, A.koniec, A.ary * sizeof(int));
+  (*ary_wynik) += A.ary;
   return;
 }
 
-// dla dwoch wyseparowanych zbiorow tworzy sume i doklada ja do wynik_rzeczy
-void scal_suma(unsigned* wynik_ary, int* wynik_poczatek, int* wynik_koniec,
+// suma i roznica maja ten sam schemat i roznia sie tylko uzyta funkcja scalania
+static zbior_ary wzor_sumy_i_roznicy(void (*scal_funkcja)(
+          unsigned*, int*, int*, zbior_ary, zbior_ary),
+          zbior_ary A, zbior_ary B) {
+  unsigned rozmiar = min((long long)A.ary + B.ary, UINT_MAX);
+  if (rozmiar == 0) return ciag_pusty();
+  int *poczatek_bazowy = alokowanie((rozmiar) * sizeof(int));
+  int *koniec_bazowy = alokowanie((rozmiar) * sizeof(int));
+  int *poczatek = poczatek_bazowy, *koniec = koniec_bazowy;
+  unsigned ary = 0;
+  unsigned i_A= 0, i_B = 0;
+  while (i_A < A.ary ||  i_B < B.ary) {
+    unsigned i_A_stare = i_A, i_B_stare = i_B;
+    unsigned ary_stary = ary;
+    unsigned reszta;
+    if (i_A < A.ary && i_B < B.ary)
+      reszta = min(mod(A.poczatek[i_A], q), mod(B.poczatek[i_B], q));
+    else if (i_A < A.ary)
+      reszta = mod(A.poczatek[i_A], q);
+    else 
+      reszta = mod(B.poczatek[i_B], q);
+    while (i_A < A.ary && mod(A.poczatek[i_A], q) == reszta) i_A++;
+    while (i_B < B.ary && mod(B.poczatek[i_B], q) == reszta) i_B++;
+    // wynikowe zbiory beda wyseparowane (stala reszta mod q i ta sama w obu!!)
+    zbior_ary A_sep = { .ary = i_A - i_A_stare, .poczatek = A.poczatek + i_A_stare, .koniec = A.koniec + i_A_stare};
+    zbior_ary B_sep = { .ary = i_B - i_B_stare, .poczatek = B.poczatek + i_B_stare, .koniec = B.koniec + i_B_stare};
+    scal_funkcja(&ary, poczatek, koniec, A_sep, B_sep);
+    poczatek += ary - ary_stary;
+    koniec += ary - ary_stary;
+  }
+  if (ary == 0) {
+    free(poczatek_bazowy);
+    free(koniec_bazowy);
+    return ciag_pusty();
+  }  
+  zbior_ary Z = kopia_ary((zbior_ary){ .ary = ary, .poczatek = poczatek_bazowy, .koniec = koniec_bazowy});
+  free(poczatek_bazowy);
+  free(koniec_bazowy);
+  return Z;
+}
+
+// zbior wyseparowany to taki, ktory ma dla kazdego podciagu te sama reszte modulo q
+// dla dwoch wyseparowanych z ta sama reszta zbiorow tworzy sume i doklada ja do danych wskaznikow (modyfikuje)
+static void scal_suma(unsigned *ary_wynik, int *poczatek_tab, int *koniec_tab,
                zbior_ary A, zbior_ary B) {
   unsigned ary = 0;
   if (A.ary == 0 && B.ary == 0) return;
   if (A.ary == 0) {
-    scal_kopia(wynik_ary, wynik_poczatek, wynik_koniec, B);
+    scal_kopia(ary_wynik, poczatek_tab, koniec_tab, B);
     return;
   }
   if (B.ary == 0) {
-    scal_kopia(wynik_ary, wynik_poczatek, wynik_koniec, A);
+    scal_kopia(ary_wynik, poczatek_tab, koniec_tab, A);
     return;
   }
-  unsigned i = 0, j = 0;
-  // ustawiamy pierwszy analizowany przedzial na ten o najmniejszym poczatku korzystajac z niezmiennikow zbioru
+  unsigned i_A = 0, i_B = 0;
+  // ustawiamy pierwszy analizowany przedzial na ten z mniejszym poczatkiem
   int poczatek, koniec;
   if (A.poczatek[0] <= B.poczatek[0]) {
-    poczatek = A.poczatek[i];
-    koniec = A.koniec[i];
-    i++;
+    poczatek = A.poczatek[i_A];
+    koniec = A.koniec[i_A];
+    i_A++;
   } else {
-    poczatek = B.poczatek[j];
-    koniec = B.koniec[j];
-    j++;
+    poczatek = B.poczatek[i_B];
+    koniec = B.koniec[i_B];
+    i_B++;
   }
-  while (i < A.ary || j < B.ary) {
+  while (i_A < A.ary || i_B < B.ary) {
     int nastepny_poczatek, nastepny_koniec;
     //ustawiamy na nastepne krance ten z dostepnych, ktorego poczatek jest mniejszy
-    if (j >= B.ary || (i < A.ary && A.poczatek[i] <= B.poczatek[j])) {
-      nastepny_poczatek = A.poczatek[i];
-      nastepny_koniec = A.koniec[i];
-      i++;
+    if (i_B == B.ary || (i_A < A.ary && A.poczatek[i_A] <= B.poczatek[i_B])) {
+      nastepny_poczatek = A.poczatek[i_A];
+      nastepny_koniec = A.koniec[i_A];
+      i_A++;
     } else {
-      nastepny_poczatek = B.poczatek[j];
-      nastepny_koniec = B.koniec[j];
-      j++;
+      nastepny_poczatek = B.poczatek[i_B];
+      nastepny_koniec = B.koniec[i_B];
+      i_B++;
     }
     // badamy czy sie przecinaja i odpowiednio zwiekszamy przedzial, 
-    // albo dokladamy poprzednie krance do wyniku 
-    // i w nastepnym obrocie petli korzystamy juz z tych nowych 
+    // albo jezeli sie nie przecinaja to dokladamy poprzednie krance do wyniku 
+    // i w nastepnym obrocie petli korzystamy juz z tych nowych;
     // uzywamy long longa zeby limity nie wywalily
-    if (nastepny_poczatek <= (long long)koniec + q_globalne) {
+    if (nastepny_poczatek <= (long long)koniec + q) {
       if (nastepny_koniec > koniec) koniec = nastepny_koniec;
     } else {
-      wynik_poczatek[ary] = poczatek;
-      wynik_koniec[ary] = koniec;
+      poczatek_tab[ary] = poczatek;
+      koniec_tab[ary] = koniec;
       ary++;
       poczatek = nastepny_poczatek;
       koniec = nastepny_koniec;
     }
   }
   // jeszcze trzeba dodac ostatni
-  wynik_poczatek[ary] = poczatek;
-  wynik_koniec[ary] = koniec;
+  poczatek_tab[ary] = poczatek;
+  koniec_tab[ary] = koniec;
   ary++;
-  *wynik_ary += ary;
+  *ary_wynik += ary;
   return;
 }
 
-// Daje w wyniku zbior reprezentujacy teoriomnogosciowa sume zbiorow A i B.
-zbior_ary suma(zbior_ary A, zbior_ary B) {
-  if (A.ary == 0 && B.ary == 0) return ciag_pusty();
-  if (A.ary == 0) {
-    return kopia_ary(B);
-  }
+// dla dwoch wyseparowanych (o tej samej reszcie) zbiorow tworzy roznice i doklada ja do podanych wskaznikow
+static void scal_roznica(unsigned *ary_wynik, int *poczatek_tab, int *koniec_tab,
+                  zbior_ary A, zbior_ary B) {
+  if (A.ary == 0) return;
   if (B.ary == 0) {
-    return kopia_ary(A);
+    scal_kopia(ary_wynik, poczatek_tab, koniec_tab, A);
+    return;
   }
-  // badamy czy rozmiar wyjdzie poza limity unsigned inta
-  unsigned rozmiar = A.ary + B.ary;
-  if (UINT_MAX - A.ary < B.ary) rozmiar = UINT_MAX;
-  int* poczatek_bazowy = malloc((size_t)rozmiar * sizeof(int));
-  int* koniec_bazowy = malloc((size_t)rozmiar * sizeof(int));
-  check_alloc(poczatek_bazowy);
-  check_alloc(koniec_bazowy);
-  int *poczatek = poczatek_bazowy, *koniec = koniec_bazowy;
-
+  unsigned i_A = 0, i_B = 0;
   unsigned ary = 0;
-  unsigned i = 0, j = 0;
-  // chcemy przejsc po wszystkich resztach modulo q_globalne 
-  // wystepujacych w zbiorach A i B,
-  // po kazdej dokladnie raz i w kolejnosci rosnacej
-  while (i < A.ary || j < B.ary) {
-    int r;
-    if (i < A.ary && j < B.ary)
-      r = min(mod(A.poczatek[i], q_globalne), mod(B.poczatek[j], q_globalne));
-    else if (i < A.ary)
-      r = mod(A.poczatek[i], q_globalne);
-    else
-      r = mod(B.poczatek[j], q_globalne);
-    while (i < A.ary && mod(A.poczatek[i], q_globalne) == r) i++;
-    while (j < B.ary && mod(B.poczatek[j], q_globalne) == r) j++;
-    // jak juz mamy reszte to separujemy wzgledem jej A i B, potem scalamy 
-    unsigned stare_ary = ary;
-    zbior_ary A_sep = separuj(r, A);
-    zbior_ary B_sep = separuj(r, B);
-    scal_suma(&ary, poczatek, koniec, A_sep, B_sep);
-    poczatek += ary - stare_ary;
-    koniec += ary - stare_ary;
-    //zwalniamy pomocnicze zmienne
-    free_ary(&A_sep);
-    free_ary(&B_sep);
+  // poczatek i koniec beda krancami przedzialu z A ktory aktualnie bierzemy na warsztat,
+  // jak juz bedziemy mieli pewnosc ze nie bedzie modyfikowany to dokladamy go do wynikowych tablic
+  // jak ponizej mamy +- q to nie wyjdzie poza limity inta bo odpowiednie nierownosci sa ostre
+  // ponizsze warunki sa wyczerpujace, wiec petla sie nie zapetli
+  int poczatek = A.poczatek[0], koniec = A.koniec[0];
+  while (i_A < A.ary && i_B < B.ary) {
+    // jezeli przedzial z B zawiera caly przedzial z A, to caly go odejmie, 
+    // wiec bierzemy nastepny z A
+    if (B.poczatek[i_B] <= poczatek && B.koniec[i_B] >= koniec) {
+      i_A++;
+      if (i_A < A.ary) {
+        poczatek = A.poczatek[i_A];
+        koniec = A.koniec[i_A];
+      }
+    } // jezeli przedzial z B jest scisle wewnatrz przedzialu z A, 
+      // to mozemy dolozyc do tablicy wyniku ten o mniejszym poczatku, 
+      // bo nie moze on juz byc modyfikowany przez nic, co bedzie w B
+    else if (B.poczatek[i_B] > poczatek && B.koniec[i_B] < koniec) {
+      poczatek_tab[ary] = poczatek;
+      koniec_tab[ary] = B.poczatek[i_B] - q;
+      poczatek = B.koniec[i_B] + q;
+      ary++;
+      i_B++;
+    } // jesli sa rozlaczne i ten z B ma mniejszy poczatek, to 
+      // ten juz nic nie zdziala i musimy rozpatrzec kolejny podciag B
+    else if (B.koniec[i_B] < poczatek) i_B++;
+    // jezeli sa rozlaczne i ten z A ma mniejszy poczatek, 
+    // to juz nie moze byc nigdy odjety, wiec dodajemy krance do wyniku
+    else if (B.poczatek[i_B] > koniec) {
+      poczatek_tab[ary] = poczatek;
+      koniec_tab[ary] = koniec;
+      ary++;
+      i_A++;
+      if (i_A < A.ary) {
+        poczatek = A.poczatek[i_A];
+        koniec = A.koniec[i_A];
+      }
+    } // jezeli przecinaja sie wlasciwie i przedzial z A ma mniejszy poczatek, to 
+      // dodajemy to nie odjete do wyniku i bierzemy na warsztat koleny przedzial z A
+    else if (B.poczatek[i_B] > poczatek && B.poczatek[i_B] <= koniec && B.koniec[i_B] >= koniec) {
+      poczatek_tab[ary] = poczatek;
+      koniec_tab[ary] = B.poczatek[i_B] - q;
+      ary++;
+      i_A++;
+      if (i_A < A.ary) {
+        poczatek = A.poczatek[i_A];
+        koniec = A.koniec[i_A];
+      }
+    } // jezeli przecinaja sie wlasciwie i przedzial z A ma wiekszy poczatek, to 
+    // odejmujemy czesc wspolna, czyli przesuwamy poczatek przedzialu z A, i bierzemy kolejny przedzial z B
+    else if (B.poczatek[i_B] <= poczatek && B.koniec[i_B] >= poczatek && B.koniec[i_B] < koniec) {
+      poczatek = B.koniec[i_B] + q;
+      i_B++;
+    }
   }
+  // jesli B sie skonczylo to dokladamy to co zostalo z A
+  while (i_A < A.ary) {
+    poczatek_tab[ary] = poczatek;
+    koniec_tab[ary] = koniec;
+    i_A++, ary++;
+    if (i_A < A.ary) {
+      poczatek = A.poczatek[i_A];
+      koniec = A.koniec[i_A];
+    }
+  }
+  *ary_wynik += ary;
+  return;
+}
 
-  if (ary == 0) {
-    free(poczatek_bazowy);
-    free(koniec_bazowy);
-    return ciag_pusty();
-  }  
-  // ary <= A.ary + B.ary, wiec realloc obetnie koncowke zaalokowanej wczesniej
-  // pamieci, trzeba tak ifowac gdyby zdarzyly sie problemy z alokacja
-  int* tmp = realloc(poczatek_bazowy, (size_t)ary * sizeof(int));
-  if (tmp == NULL) {
-    free(poczatek_bazowy);
-    free(koniec_bazowy);
-    exit(1);
-  }
-  poczatek_bazowy = tmp;
-  tmp = realloc(koniec_bazowy, (size_t)ary * sizeof(int));
-  if (tmp == NULL) {
-    free(poczatek_bazowy);
-    free(koniec_bazowy);
-    exit(1);
-  }
-  koniec_bazowy = tmp;
-  zbior_ary z = {
-      .ary = ary, .poczatek = poczatek_bazowy, .koniec = koniec_bazowy};
-  return z;
+zbior_ary suma(zbior_ary A, zbior_ary B) {
+  return wzor_sumy_i_roznicy(scal_suma, A, B);
+}
+
+// Daje w wyniku zbior A \ B.
+zbior_ary roznica(zbior_ary A, zbior_ary B) {
+  return wzor_sumy_i_roznicy(scal_roznica, A, B);
 }
 
 // Daje w wyniku zbior reprezentujacy czesc wspolna zbiorow A i B.
 zbior_ary iloczyn(zbior_ary A, zbior_ary B) {
-  if (A.ary == 0 || B.ary == 0) return ciag_pusty();
   // korzystamy z wzorow teoriomnogosciowych: A n B = A \ (A \ B)
   zbior_ary C = roznica(A, B);
   zbior_ary D = roznica(A, C);
@@ -281,189 +286,23 @@ zbior_ary iloczyn(zbior_ary A, zbior_ary B) {
   free_ary(&C);  
   return D;
 }
-// dla dwoch wyseparowanych zbiorow tworzy roznice i doklada ja do wynik_rzeczy
-void scal_roznica(unsigned* wynik_ary, int* wynik_poczatek, int* wynik_koniec,
-                  zbior_ary A, zbior_ary B) {
-  if (A.ary == 0) return;
-  if (B.ary == 0) {
-    scal_kopia(wynik_ary, wynik_poczatek, wynik_koniec, A);
-    return;
-  }
-  unsigned i = 0, j = 0;
-  unsigned ary = 0;
-  int poczatek = A.poczatek[0], koniec = A.koniec[0];
-  // poczatek i koniec to analizowany podciag z A
-  // bierzemy podciag z B, moze on byc wzgledem krancow z A:
-  // - calkowicie na lewo, wtedy bierzemy kolejny podciag B
-  // - troche na lewo troche wewnatrz, wtedy przesuwamy w prawo poczatek do B.koniec[j] + q
-  // - na lewo i na prawo, wtedy bierzemy kolejny podciag z A
-  // - calkowicie na prawo, wtedy dokladamy krance do wyniku i bierzemy nowe z A
-  // - wewnatrz lub wewnatrz i troche w prawo, wtedy dokladamy do wyniku poczatek i koniec obciety do B.poczatek[j] - q,
-  // potem ustawiamy krance na prawa czesc poprzednich krancow (jesli sa) i bierzemy kolejny podciag z B,
-  // lub bierzemy kolejny podciag z A
-  while (i < A.ary && j < B.ary) {
-    if (B.poczatek[j] <= poczatek) {
-      // calkowicie na lewo
-      if (B.koniec[j] < poczatek)
-        j++;
-      // troche na lewo troche wewnatrz
-      else if (B.koniec[j] >= poczatek && B.koniec[j] < koniec) {
-        //nie wyjdzie poza limity, bo nierownosc jest ostra, czyli cos jeszcze jest na prawo
-        poczatek = B.koniec[j] + q_globalne;
-        j++;
-      // na lewo i na prawo
-      } else if (B.koniec[j] >= koniec) {
-        i++;
-        if (i < A.ary) poczatek = A.poczatek[i], koniec = A.koniec[i];
-      }
-    // calkowicie na prawo
-    } else if (B.poczatek[j] > koniec) {
-      wynik_poczatek[ary] = poczatek;
-      wynik_koniec[ary] = koniec;
-      i++, ary++;
-      if (i < A.ary) {
-        poczatek = A.poczatek[i];
-        koniec = A.koniec[i];
-      }
-    // wewnatrz lub troche w prawo
-    } else if (B.poczatek[j] > poczatek && B.poczatek[j] <= koniec) {
-      wynik_poczatek[ary] = poczatek;
-      wynik_koniec[ary] = B.poczatek[j] - q_globalne;
-      ary++;
-      // wewnatrz
-      if (B.koniec[j] < koniec) {
-        //nie wyjdzie poza limity, bo nierownosc jest ostra, czyli cos jeszcze jest na prawo
-        poczatek = B.koniec[j] + q_globalne;
-        j++;
-      // wewnatrz i troche w prawo
-      } else {
-        i++;
-        if (i < A.ary) {
-          poczatek = A.poczatek[i];
-          koniec = A.koniec[i];
-        }
-      }
-    }
-  }
-  // jesli B sie skonczylo to dokladamy to co zostalo z A
-  while (i < A.ary) {
-    wynik_poczatek[ary] = poczatek;
-    wynik_koniec[ary] = koniec;
-    i++, ary++;
-    if (i < A.ary) {
-      poczatek = A.poczatek[i];
-      koniec = A.koniec[i];
-    }
-  }
-  *wynik_ary += ary;
-  return;
-}
-// Daje w wyniku zbior A \ B.
-zbior_ary roznica(zbior_ary A, zbior_ary B) {
-  if (A.ary == 0) return ciag_pusty();
-  if (B.ary == 0) return kopia_ary(A);
-  // badamy czy rozmiar wyjdzie poza limity unsigned inta
-  unsigned rozmiar = A.ary + B.ary;
-  if (UINT_MAX - A.ary < B.ary) rozmiar = UINT_MAX;
-  // maksymalna wielkosc roznicy to A.ary + B.ary, bo kazdy podciag z B moze
-  // zwiekszyc ary wyniku o 1
-  int* poczatek_bazowy = malloc((size_t)rozmiar * sizeof(int));
-  int* koniec_bazowy = malloc((size_t)rozmiar * sizeof(int));
-  check_alloc(poczatek_bazowy);
-  check_alloc(koniec_bazowy);
-  int *poczatek = poczatek_bazowy, *koniec = koniec_bazowy;
-  unsigned ary = 0;
-  // wystarczy ze przejdziemy po resztach modulo q_globalne wystepujacych w A
-  // po kazdej dokladnie raz
-  for (unsigned i = 0; i < A.ary;) {
-    int r = mod(A.poczatek[i], q_globalne);
-    while (i < A.ary && mod(A.poczatek[i], q_globalne) == r) i++;
-    unsigned stare_ary = ary;
-    zbior_ary A_sep = separuj(r, A);
-    zbior_ary B_sep = separuj(r, B);
-    scal_roznica(&ary, poczatek, koniec, A_sep, B_sep);
-    poczatek += ary - stare_ary;
-    koniec += ary - stare_ary;
-    // dealokujemy wnetrze pomocniczych zbiorow
-    free_ary(&A_sep);
-    free_ary(&B_sep);
-  }
-  // ary <= A.ary + B.ary, wiec realloc obetnie koncowke zaalokowanej wczesniej pamieci
-  if (ary == 0) {
-    free(poczatek_bazowy);
-    free(koniec_bazowy);
-    return ciag_pusty();
-  }
-  // trzeba badac czy realloc sie udal
-  int* tmp = realloc(poczatek_bazowy, (size_t)ary * sizeof(int));
-  if (tmp == NULL) {
-    free(poczatek_bazowy);
-    free(koniec_bazowy);
-    exit(1);
-  }
-  poczatek_bazowy = tmp;
-  tmp = realloc(koniec_bazowy, (size_t)ary * sizeof(int));
-  if (tmp == NULL) {
-    free(poczatek_bazowy);
-    free(koniec_bazowy);
-    exit(1);
-  }
-  koniec_bazowy = tmp;
-  zbior_ary z = {
-      .ary = ary, .poczatek = poczatek_bazowy, .koniec = koniec_bazowy};
-  return z;
-}
+
 // Daje w wyniku true wtw. gdy liczba b nalezy do zbioru A.
 bool nalezy(zbior_ary A, int b) {
   if (A.ary == 0) return false;
-  int r = mod(b, q_globalne);
-  // chcemy znalezc poczatek i koniec indeksow takich, ze ich reszta modulo q to r
-  // nazwiemy je start i finish bo kreatywnosc mi sie konczy
-  // juz zeby limity inta za mocno nie przeszkadzaly to licze w long longach, duzej roznicy to nie robi
-
-  // bisekcyjne szukanie najmniejszego elementu z modulo >= r
-  long long lewy = 0, prawy = A.ary - 1;
+  unsigned reszta = mod(b, q);
+  unsigned lewy = 0, prawy = A.ary - 1;
   while (lewy < prawy) {
-    long long srodek = (lewy + prawy) / 2;
-    if (mod(A.poczatek[srodek], q_globalne) >= r)
+    unsigned srodek = (lewy + prawy) / 2;
+    if ( mod(A.poczatek[srodek], q) > reszta ||
+        (reszta == mod(A.poczatek[srodek], q) &&
+        b <= A.koniec[srodek])) {
       prawy = srodek;
-    else
+    } else {
       lewy = srodek + 1;
-  }
-  long long start = lewy;
-
-  // jesli start nie bedzie w A lub reszta start mod q nie bedzie rowna r,
-  // to oznacza to ze w zbiorze nie ma zadnego elementu z reszta r
-  if (start == A.ary || mod(A.poczatek[start], q_globalne) != r) return false;
-
-  // bisekcyjne szukanie najmniejszego elementu z modulo > r
-  lewy = 0, prawy = A.ary - 1;
-  long long finish = A.ary;
-  while (lewy <= prawy) {
-    long long srodek = (lewy + prawy) / 2;
-    if (mod(A.poczatek[srodek], q_globalne) <= r)
-      lewy = srodek + 1;
-    else {
-      finish = srodek;
-      prawy = srodek - 1;
     }
   }
-  // teraz miedzy start i finish-1 bisekcyjnie szukamy najmniejszego poczatku ciagu >= b,
-  // bo ciagi sa rozlaczne i posortowane rosnaco, wiec b moze byc tylko w jednym
-  lewy = start, prawy = finish - 1;
-  long long x = -1;  // wartosc nieosiagalna
-  while (lewy <= prawy) {
-    long long srodek = (lewy + prawy) / 2;
-    if (A.poczatek[srodek] <= b) {
-      x = srodek;
-      lewy = srodek + 1;
-    } else
-      prawy = srodek - 1;
-  }
-  if (x == -1) return false;
-  // b oraz x-ty ciag maja te sama reszte modulo q, 
-  // wiec wystaczy sprawdzic czy b jest miedzy poczatkiem a koncem
-  if (b >= A.poczatek[x] && b <= A.koniec[x]) return true;
+  if (mod(A.poczatek[lewy],q) == reszta && b >= A.poczatek[lewy] && b <= A.koniec[lewy]) return true;
   return false;
 }
 
@@ -473,17 +312,12 @@ unsigned moc(zbior_ary A) {
   // liczymy liczbe elementow kazdego podciagu i potem sumujemy
   for (unsigned i = 0; i < A.ary; i++) {
     assert(A.poczatek[i] <= A.koniec[i]);
-    unsigned rozmiar;
-    // robimy takie triki zeby po drodze nie zdarzyl sie overflow,
-    // z takimi warunkami zawsze miescimy sie w limitach inta
-    if (A.poczatek[i] < 0 && A.koniec[i] >= 0)
-      rozmiar = (unsigned)A.koniec[i] + (unsigned)(-(A.poczatek[i] + 1)) + 1;
-    else
-      rozmiar = (unsigned)(A.koniec[i] - A.poczatek[i]);
-    moc += rozmiar / (unsigned)q_globalne + 1;
+    unsigned rozmiar = (unsigned)((long long)A.koniec[i] - A.poczatek[i]);
+    moc += rozmiar / (unsigned)q + 1;
   }
   return moc;
 }
+
 // Wynikiem funkcji jest Ary_q(A), czyli minimalna liczba parami rozlacznych
 // ciagow arytmetycznych o roznicy q, ktorych suma jest zbior A.
 unsigned ary(zbior_ary A) { return A.ary; }

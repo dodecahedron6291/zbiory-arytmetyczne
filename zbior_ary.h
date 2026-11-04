@@ -2,12 +2,12 @@
 #define _ZBIOR_ARY_H_
 
 #include <stdbool.h>
-
-typedef struct zbior_ary {// zbior reprezentowany przez sume rozlacznych
-                          // ciagow posortowanych najpierw po reszcie modulo
-                          // q_globalne, potem po rosnacych poczatkach zbiorow
-                          // niezmienniki: poczatek[i] <= koniec[i] i ww. sortowanie
-                          // zbior pusty ma ary = 0 i wzkazniki = NULL
+// zbior reprezentowany przez sume rozlacznych
+// ciagow posortowanych najpierw po reszcie modulo
+// q_globalne, potem po rosnacych poczatkach zbiorow
+// niezmienniki: poczatek[i] <= koniec[i] i ww. sortowanie
+// zbior pusty ma ary = 0 i wzkazniki = NULL
+typedef struct zbior_ary {
   unsigned ary;           // liczba ciagow
   int* poczatek;          // poczatki ciagow
   int* koniec;            // konce ciagow
@@ -23,8 +23,6 @@ zbior_ary ciag_arytmetyczny(int a, int q, int b);
 
 // Daje w wyniku zbior zlozony z samego elementu a, tj. {a}.
 zbior_ary singleton(int a);
-void print_ary(zbior_ary A);
-void free_ary(zbior_ary* A);
 
 // Daje w wyniku zbior reprezentujacy teoriomnogosciowa sume zbiorow A i B.
 zbior_ary suma(zbior_ary A, zbior_ary B);
